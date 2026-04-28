@@ -1,98 +1,103 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import * as ImagePicker from "expo-image-picker";
+import * as MediaLibrary from "expo-media-library";
+import React, { useState } from "react";
+import { Alert, Button, Image, Text, View } from "react-native";
+import { styles } from "../styles";
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+export default function Index() {
+  const [image, setImage] = useState<string | null>(null);
 
-export default function HomeScreen() {
+  // FUNGSI BUKA KAMERA
+  const openCamera = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permission Required", "Izin kamera diperlukan!");
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 1,
+    });
+
+    if (!result.canceled) {
+      setImage(result.assets[0].uri);
+    }
+  };
+
+  // FUNGSI BUKA GALERI
+  const openGallery = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permission Required", "Izin galeri diperlukan!");
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 1,
+    });
+
+    if (!result.canceled) {
+      setImage(result.assets[0].uri);
+    }
+  };
+
+  // FUNGSI SIMPAN GAMBAR
+  const saveImage = async () => {
+    if (!image) {
+      Alert.alert("Gagal", "Belum ada gambar yang dipilih atau diambil!");
+      return;
+    }
+
+    try {
+      await MediaLibrary.saveToLibraryAsync(image);
+      Alert.alert("Berhasil!", "Gambar telah tersimpan di galeri kamu.");
+    } catch (error) {
+      console.error(error);
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status === "granted") {
+        await MediaLibrary.saveToLibraryAsync(image);
+        Alert.alert("Berhasil!", "Gambar tersimpan.");
+      } else {
+        Alert.alert("Error", "Izin ditolak oleh sistem.");
+      }
+    }
+  };
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome test!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+    <View style={styles.container}>
+      <Text style={styles.text}>Qonita Azalia - 00000093589</Text>
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+      <View style={styles.buttonContainer}>
+        <View style={styles.buttonWrapper}>
+          <Button title="OPEN CAMERA" onPress={openCamera} color="#2196F3" />
+        </View>
+
+        <View style={styles.buttonWrapper}>
+          <Button title="OPEN GALLERY" onPress={openGallery} color="#4CAF50" />
+        </View>
+
+        {/* Tombol Simpan muncul hanya jika ada gambar */}
+        {image && (
+          <View style={styles.buttonWrapper}>
+            <Button title="SAVE IMAGE" onPress={saveImage} color="#FF9800" />
+          </View>
+        )}
+      </View>
+
+      {image ? (
+        <Image source={{ uri: image }} style={styles.image} />
+      ) : (
+        <View
+          style={[
+            styles.image,
+            { justifyContent: "center", alignItems: "center" },
+          ]}
+        >
+          <Text style={{ color: "#888" }}>Belum ada foto</Text>
+        </View>
+      )}
+    </View>
   );
 }
-
-const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
-  },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-  },
-});
