@@ -1,98 +1,212 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { decode } from "base64-arraybuffer";
+import * as FileSystem from "expo-file-system/legacy";
+import * as ImagePicker from "expo-image-picker";
+import * as Location from "expo-location";
+import React, { useEffect, useState } from "react";
+import { Alert, Button, Image, ScrollView, Text, View } from "react-native";
+import MapView, { Marker, UrlTile } from "react-native-maps";
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import { styles } from "../../styles";
+import { supabase } from "../../utils/supabase";
 
-export default function HomeScreen() {
+type Coordinates = {
+  latitude: number;
+  longitude: number;
+};
+
+export default function Index() {
+  const [image, setImage] = useState<string | null>(null);
+  const [location, setLocation] = useState<Coordinates | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+
+  // Fungsi Get Location otomatis saat aplikasi dibuka
+  useEffect(() => {
+    getLocation();
+  }, []);
+
+  const getLocation = async () => {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permission denied", "Izin lokasi diperlukan!");
+      return;
+    }
+    const loc = await Location.getCurrentPositionAsync({});
+    setLocation({
+      latitude: loc.coords.latitude,
+      longitude: loc.coords.longitude,
+    });
+  };
+
+  const handleLocationChange = (event: any) => {
+    const newCoordinate = event.nativeEvent.coordinate;
+    setLocation({
+      latitude: newCoordinate.latitude,
+      longitude: newCoordinate.longitude,
+    });
+  };
+
+  // Fungsi Buka Kamera
+  const openCamera = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permission Required", "Izin kamera diperlukan!");
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.5,
+    });
+
+    if (!result.canceled) {
+      setImage(result.assets[0].uri);
+    }
+  };
+
+  // Fungsi Simpan ke Supabase
+  const saveToSupabase = async () => {
+    if (!image) {
+      Alert.alert("Error", "Ambil foto terlebih dahulu!");
+      return;
+    }
+    if (!location) {
+      Alert.alert("Error", "Lokasi belum didapatkan!");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Konversi file gambar ke Base64 agar bisa diupload via Supabase API
+      const base64 = await FileSystem.readAsStringAsync(image, {
+        encoding: "base64",
+      });
+
+      // Bikin nama file unik berdasarkan timestamp
+      const fileName = `photo-${Date.now()}.jpg`;
+
+      // Upload ke Storage Supabase bucket 'camera'
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from("camera")
+        .upload(fileName, decode(base64), {
+          contentType: "image/jpeg",
+        });
+
+      if (uploadError) throw uploadError;
+
+      // Dapatkan Public URL dari Storage
+      const { data: publicUrlData } = supabase.storage
+        .from("camera")
+        .getPublicUrl(fileName);
+
+      const publicUrl = publicUrlData.publicUrl;
+
+      // Insert Data ke Tabel 'photo' (sesuai struktur tabel dari Modul)
+      const { error: dbError } = await supabase.from("photo").insert([
+        {
+          latitude: String(location.latitude), // Disimpan sebagai text di db
+          longitude: String(location.longitude), // Disimpan sebagai text di db
+          image_url: publicUrl,
+        },
+      ]);
+
+      if (dbError) throw dbError;
+
+      Alert.alert(
+        "Sukses!",
+        "Foto dan Geolokasi berhasil disimpan ke Supabase.",
+      );
+
+      // Bersihkan state gambar setelah berhasil upload
+      setImage(null);
+    } catch (error: any) {
+      console.error(error);
+      Alert.alert(
+        "Gagal",
+        error?.message || "Terjadi kesalahan saat menyimpan data.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome test!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+    <ScrollView contentContainerStyle={styles.scrollContainer}>
+      <Text style={styles.headerText}>Integrasi Kamera, Map & Supabase</Text>
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+      {/*Map*/}
+      <View style={styles.mapContainer}>
+        {location ? (
+          <MapView
+            style={styles.map}
+            initialRegion={{
+              latitude: location.latitude,
+              longitude: location.longitude,
+              latitudeDelta: 0.01,
+              longitudeDelta: 0.01,
+            }}
+            onPress={handleLocationChange}
+          >
+            <UrlTile
+              urlTemplate="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              maximumZ={19}
+            />
+            <Marker
+              coordinate={location}
+              title="Lokasi Foto"
+              draggable
+              onDragEnd={handleLocationChange}
+            />
+          </MapView>
+        ) : (
+          <View
+            style={[
+              styles.map,
+              styles.placeholder,
+              { backgroundColor: "#e0e0e0" },
+            ]}
+          >
+            <Text>Mengambil lokasi...</Text>
+          </View>
+        )}
+      </View>
+
+      <View style={styles.infoContainer}>
+        <Text>Lat: {location?.latitude}</Text>
+        <Text>Lon: {location?.longitude}</Text>
+        <Button title="Refresh Lokasi" onPress={getLocation} />
+      </View>
+
+      {/*Foto*/}
+      <View style={styles.imageContainer}>
+        {image ? (
+          <Image source={{ uri: image }} style={styles.image} />
+        ) : (
+          <View style={[styles.image, styles.placeholder]}>
+            <Text style={{ color: "#888" }}>Belum ada foto</Text>
+          </View>
+        )}
+      </View>
+
+      <View style={styles.buttonContainer}>
+        <View style={styles.buttonWrapper}>
+          <Button
+            title="AMBIL FOTO"
+            onPress={openCamera}
+            color="#2196F3"
+            disabled={loading}
+          />
+        </View>
+
+        {image && location && (
+          <View style={styles.buttonWrapper}>
+            <Button
+              title={loading ? "MENYIMPAN..." : "SIMPAN KE SUPABASE"}
+              onPress={saveToSupabase}
+              color="#FF9800"
+              disabled={loading}
+            />
+          </View>
+        )}
+      </View>
+    </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
-  },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-  },
-});
