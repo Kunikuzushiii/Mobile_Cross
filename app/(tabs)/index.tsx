@@ -1,13 +1,106 @@
 import { decode } from "base64-arraybuffer";
+import Constants from "expo-constants";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
+import * as Notifications from "expo-notifications";
 import React, { useEffect, useState } from "react";
-import { Alert, Button, Image, ScrollView, Text, View } from "react-native";
+import {
+  Alert,
+  Button,
+  Image,
+  Platform,
+  ScrollView,
+  Text,
+  View,
+} from "react-native";
 import MapView, { Marker, UrlTile } from "react-native-maps";
 
 import { styles } from "../../styles";
 import { supabase } from "../../utils/supabase";
+
+// 1. Konfigurasi Handler Notifikasi
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
+  }),
+});
+
+// 2. Fungsi untuk mengirim Push Notification
+async function sendPushNotification(
+  expoPushToken: string,
+  title: string,
+  body: string,
+) {
+  const message = {
+    to: expoPushToken,
+    sound: "default",
+    title: title,
+    body: body,
+    data: { someData: "goes here" },
+  };
+
+  await fetch("https://exp.host/--/api/v2/push/send", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Accept-encoding": "gzip, deflate",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(message),
+  });
+}
+
+// 3. Fungsi untuk mendaftarkan dan mendapatkan Token Push Notification
+async function registerForPushNotificationsAsync() {
+  if (Platform.OS === "android") {
+    await Notifications.setNotificationChannelAsync("default", {
+      name: "default",
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: "#FF231F7C",
+    });
+  }
+
+  const { status: existingStatus } = await Notifications.getPermissionsAsync();
+  let finalStatus = existingStatus;
+
+  if (existingStatus !== "granted") {
+    const { status } = await Notifications.requestPermissionsAsync();
+    finalStatus = status;
+  }
+
+  if (finalStatus !== "granted") {
+    Alert.alert(
+      "Error",
+      "Permission not granted to get push token for push notification!",
+    );
+    return;
+  }
+
+  const projectId =
+    Constants?.expoConfig?.extra?.eas?.projectId ??
+    Constants?.easConfig?.projectId;
+
+  if (!projectId) {
+    Alert.alert("Error", "Project ID not found");
+    return;
+  }
+
+  try {
+    const pushTokenString = (
+      await Notifications.getExpoPushTokenAsync({
+        projectId,
+      })
+    ).data;
+    return pushTokenString;
+  } catch (e: unknown) {
+    Alert.alert("Error", String(e));
+  }
+}
 
 type Coordinates = {
   latitude: number;
@@ -18,10 +111,16 @@ export default function Index() {
   const [image, setImage] = useState<string | null>(null);
   const [location, setLocation] = useState<Coordinates | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
+  const [expoPushToken, setExpoPushToken] = useState<string>("");
 
-  // Fungsi Get Location otomatis saat aplikasi dibuka
+  // Get Location dan Register Notification saat aplikasi dibuka
   useEffect(() => {
     getLocation();
+
+    // Mendaftarkan token notifikasi
+    registerForPushNotificationsAsync().then((token) => {
+      if (token) setExpoPushToken(token);
+    });
   }, []);
 
   const getLocation = async () => {
@@ -45,7 +144,6 @@ export default function Index() {
     });
   };
 
-  // Fungsi Buka Kamera
   const openCamera = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== "granted") {
@@ -62,7 +160,6 @@ export default function Index() {
     }
   };
 
-  // Fungsi Simpan ke Supabase
   const saveToSupabase = async () => {
     if (!image) {
       Alert.alert("Error", "Ambil foto terlebih dahulu!");
@@ -75,15 +172,12 @@ export default function Index() {
 
     setLoading(true);
     try {
-      // Konversi file gambar ke Base64 agar bisa diupload via Supabase API
       const base64 = await FileSystem.readAsStringAsync(image, {
         encoding: "base64",
       });
 
-      // Bikin nama file unik berdasarkan timestamp
       const fileName = `photo-${Date.now()}.jpg`;
 
-      // Upload ke Storage Supabase bucket 'camera'
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from("camera")
         .upload(fileName, decode(base64), {
@@ -92,18 +186,16 @@ export default function Index() {
 
       if (uploadError) throw uploadError;
 
-      // Dapatkan Public URL dari Storage
       const { data: publicUrlData } = supabase.storage
         .from("camera")
         .getPublicUrl(fileName);
 
       const publicUrl = publicUrlData.publicUrl;
 
-      // Insert Data ke Tabel 'photo' (sesuai struktur tabel dari Modul)
       const { error: dbError } = await supabase.from("photo").insert([
         {
-          latitude: String(location.latitude), // Disimpan sebagai text di db
-          longitude: String(location.longitude), // Disimpan sebagai text di db
+          latitude: String(location.latitude),
+          longitude: String(location.longitude),
           image_url: publicUrl,
         },
       ]);
@@ -114,15 +206,29 @@ export default function Index() {
         "Sukses!",
         "Foto dan Geolokasi berhasil disimpan ke Supabase.",
       );
+      if (expoPushToken) {
+        await sendPushNotification(
+          expoPushToken,
+          "Data Berhasil Disimpan!",
+          `Lokasi: Lat ${location.latitude.toFixed(5)}, Lon ${location.longitude.toFixed(5)}`,
+        );
+      }
 
-      // Bersihkan state gambar setelah berhasil upload
       setImage(null);
     } catch (error: any) {
       console.error(error);
+
       Alert.alert(
         "Gagal",
         error?.message || "Terjadi kesalahan saat menyimpan data.",
       );
+      if (expoPushToken) {
+        await sendPushNotification(
+          expoPushToken,
+          "Gagal Menyimpan Data!",
+          error?.message || "Cek koneksi dan konfigurasi Supabase Anda.",
+        );
+      }
     } finally {
       setLoading(false);
     }

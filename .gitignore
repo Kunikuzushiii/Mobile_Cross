@@ -37,6 +37,9 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
+# Firebase Service Account Private Key
+if670-week12-notificatio-6e0e0-firebase-adminsdk-fbsvc-44c1b191ff.json
+
 app-example
 
 # generated native folders
