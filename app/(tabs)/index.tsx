@@ -16,6 +16,12 @@ import {
 } from "react-native";
 import MapView, { Marker, UrlTile } from "react-native-maps";
 
+import { useAppDispatch, useAppSelector } from "../../store/hooks";
+import {
+  incrementFail,
+  incrementSuccess,
+} from "../../store/notification.slice";
+
 import { styles } from "../../styles";
 import { supabase } from "../../utils/supabase";
 
@@ -108,16 +114,19 @@ type Coordinates = {
 };
 
 export default function Index() {
+  // REDUX STATE & DISPATCH
+  const dispatch = useAppDispatch();
+  const { successCount, failCount } = useAppSelector(
+    (state) => state.notification,
+  );
+
   const [image, setImage] = useState<string | null>(null);
   const [location, setLocation] = useState<Coordinates | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [expoPushToken, setExpoPushToken] = useState<string>("");
 
-  // Get Location dan Register Notification saat aplikasi dibuka
   useEffect(() => {
     getLocation();
-
-    // Mendaftarkan token notifikasi
     registerForPushNotificationsAsync().then((token) => {
       if (token) setExpoPushToken(token);
     });
@@ -175,7 +184,6 @@ export default function Index() {
       const base64 = await FileSystem.readAsStringAsync(image, {
         encoding: "base64",
       });
-
       const fileName = `photo-${Date.now()}.jpg`;
 
       const { data: uploadData, error: uploadError } = await supabase.storage
@@ -202,31 +210,34 @@ export default function Index() {
 
       if (dbError) throw dbError;
 
-      Alert.alert(
-        "Sukses!",
-        "Foto dan Geolokasi berhasil disimpan ke Supabase.",
-      );
+      // SUCCESS BLOCK
+      dispatch(incrementSuccess()); // Update state redux
+      const newSuccessCount = successCount + 1; // Kalkulasi untuk di pass ke notif saat ini
+
+      Alert.alert("Sukses!", "Foto dan Geolokasi berhasil disimpan.");
+
       if (expoPushToken) {
         await sendPushNotification(
           expoPushToken,
-          "Data Berhasil Disimpan!",
-          `Lokasi: Lat ${location.latitude.toFixed(5)}, Lon ${location.longitude.toFixed(5)}`,
+          "Data share: Sent files", // Disesuaikan dengan mockup tugas
+          `${newSuccessCount} successful, ${failCount} unsuccessful`,
         );
       }
-
       setImage(null);
     } catch (error: any) {
       console.error(error);
 
-      Alert.alert(
-        "Gagal",
-        error?.message || "Terjadi kesalahan saat menyimpan data.",
-      );
+      // FAILED BLOCK
+      dispatch(incrementFail()); // Update state redux
+      const newFailCount = failCount + 1; // Kalkulasi untuk di pass ke notif saat ini
+
+      Alert.alert("Gagal", error?.message || "Terjadi kesalahan.");
+
       if (expoPushToken) {
         await sendPushNotification(
           expoPushToken,
-          "Gagal Menyimpan Data!",
-          error?.message || "Cek koneksi dan konfigurasi Supabase Anda.",
+          "Data share: Sent files", // Disesuaikan dengan mockup tugas
+          `${successCount} successful, ${newFailCount} unsuccessful`,
         );
       }
     } finally {
@@ -236,9 +247,26 @@ export default function Index() {
 
   return (
     <ScrollView contentContainerStyle={styles.scrollContainer}>
-      <Text style={styles.headerText}>Integrasi Kamera, Map & Supabase</Text>
+      <Text style={styles.headerText}>
+        Integrasi Kamera, Map, Supabase & Redux
+      </Text>
 
-      {/*Map*/}
+      {/* Menampilkan Status Redux di UI */}
+      <View
+        style={{
+          flexDirection: "row",
+          justifyContent: "space-around",
+          marginVertical: 10,
+        }}
+      >
+        <Text style={{ color: "green", fontWeight: "bold" }}>
+          Sukses: {successCount}
+        </Text>
+        <Text style={{ color: "red", fontWeight: "bold" }}>
+          Gagal: {failCount}
+        </Text>
+      </View>
+
       <View style={styles.mapContainer}>
         {location ? (
           <MapView
@@ -281,7 +309,6 @@ export default function Index() {
         <Button title="Refresh Lokasi" onPress={getLocation} />
       </View>
 
-      {/*Foto*/}
       <View style={styles.imageContainer}>
         {image ? (
           <Image source={{ uri: image }} style={styles.image} />
@@ -305,7 +332,7 @@ export default function Index() {
         {image && location && (
           <View style={styles.buttonWrapper}>
             <Button
-              title={loading ? "MENYIMPAN..." : "SIMPAN KE SUPABASE"}
+              title={loading ? "MENYIMPAN..." : "SIMPAN DATA"}
               onPress={saveToSupabase}
               color="#FF9800"
               disabled={loading}
